@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import React, { forwardRef, useMemo, useEffect, createContext, useRef, useImperativeHandle } from 'react'
 import { useThree, useFrame } from 'react-three-fiber'
-import { EffectComposer as EffectComposerImpl, RenderPass, EffectPass, NormalPass } from 'postprocessing'
+import { EffectComposer as EffectComposerImpl, RenderPass, DepthPickPass, EffectPass, NormalPass } from 'postprocessing'
 import { HalfFloatType, TextureDataType } from 'three'
 import { isWebGL2Available } from './util'
 
@@ -44,7 +44,7 @@ const EffectComposer = React.memo(
       scene = scene || defaultScene
       camera = camera || defaultCamera
 
-      const [composer, normalPass] = useMemo(() => {
+      const [composer, normalPass, depthPickQuery] = useMemo(() => {
         // Initialize composer
         const effectComposer = new EffectComposerImpl(gl, {
           depthBuffer,
@@ -54,12 +54,23 @@ const EffectComposer = React.memo(
         })
         // Add render pass
         effectComposer.addPass(new RenderPass(scene, camera))
+
+        // Implement raycasting pass
+        const depthPickPass = new DepthPickPass(scene, camera)
+        effectComposer.addPass(depthPickPass)
+
         // Create normal pass
         const pass = disableNormalPass ? null : new NormalPass(scene, camera)
         if (pass) {
           effectComposer.addPass(pass)
         }
-        return [effectComposer, pass]
+        return [
+          effectComposer,
+          pass,
+          (mouse, cb) => {
+            depthPickPass.query()
+          },
+        ]
       }, [camera, gl, depthBuffer, stencilBuffer, multisampling, frameBufferType, scene, disableNormalPass])
 
       useEffect(() => composer?.setSize(size.width, size.height), [composer, size])
@@ -81,8 +92,8 @@ const EffectComposer = React.memo(
       // Memoize state, otherwise it would trigger all consumers on every render
       const state = useMemo(() => ({ composer, normalPass, camera, scene }), [composer, normalPass, camera, scene])
 
-      // Expose the composer
-      useImperativeHandle(ref, () => composer, [composer])
+      // Expose the composer (updated to also pass depthPick query method)
+      useImperativeHandle(ref, () => ({ composer, depthPickQuery }), [depthPickQuery, composer])
 
       return (
         <EffectComposerContext.Provider value={state}>
